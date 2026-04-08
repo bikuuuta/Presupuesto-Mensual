@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Presupuesto Zeta</title>
+    <style>
+        :root {
+            --bg: #f8f9fa;
+            --card: #ffffff;
+            --primary: #4361ee;
+            --secondary: #8d99ae;
+            --border: #dee2e6;
+            --text: #212529;
+            --success: #1D9E75;
+            --danger: #E24B4A;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
+        body { background: var(--bg); color: var(--text); padding-bottom: 30px; }
+        .app { max-width: 480px; margin: 0 auto; padding: 16px; }
+        
+        .months-row { display: flex; overflow-x: auto; gap: 8px; padding-bottom: 12px; scrollbar-width: none; }
+        .month-pill { padding: 8px 16px; border-radius: 20px; border: 1px solid var(--border); background: var(--card); white-space: nowrap; font-size: 13px; }
+        .month-pill.active { background: var(--primary); color: white; border-color: var(--primary); }
+
+        .card { background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .salary-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+        .salary-row input { flex: 1; border: none; font-size: 28px; font-weight: bold; outline: none; width: 100%; color: var(--text); }
+        
+        .prog-bar { height: 8px; background: #eee; border-radius: 4px; overflow: hidden; }
+        .prog-fill { height: 100%; transition: width 0.3s; }
+
+        .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+        .metric { background: var(--card); padding: 12px; border-radius: 10px; border: 1px solid var(--border); }
+        .metric p { font-size: 11px; color: var(--secondary); margin-bottom: 4px; }
+        .val { font-size: 16px; font-weight: bold; }
+        .val.ok { color: var(--success); }
+        .val.bad { color: var(--danger); }
+
+        .exp-item { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid #eee; }
+        .check { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; background: none; flex-shrink: 0; }
+        .check.done { background: var(--success); border-color: var(--success); color: white; }
+        .exp-info { flex: 1; font-size: 15px; }
+        .struck { text-decoration: line-through; color: var(--secondary); }
+
+        /* Arreglo del formulario para que no se desborde */
+        .add-form { display: flex; gap: 8px; margin-top: 15px; width: 100%; }
+        .add-form input[type="text"] { flex: 2; min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
+        .add-form input[type="number"] { flex: 1; min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
+        .btn-confirm { background: var(--primary); color: white; border: none; width: 40px; height: 40px; border-radius: 8px; font-size: 20px; flex-shrink: 0; }
+
+        .btn-action { width: 100%; padding: 10px; margin-top: 10px; border-radius: 8px; border: 1px solid var(--primary); background: transparent; color: var(--primary); font-weight: 500; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<div class="app">
+    <div class="months-row" id="months-row"></div>
+
+    <div class="card">
+        <p style="font-size: 12px; color: var(--secondary)">Sueldo de <span id="month-name-lbl">...</span></p>
+        <div class="salary-row">
+            <span style="font-size: 24px;">$</span>
+            <input type="text" id="salary-display" placeholder="0" oninput="formatSalary(this)">
+        </div>
+        <div class="prog-bar"><div id="prog-fill" class="prog-fill" style="width: 0%"></div></div>
+    </div>
+
+    <div class="grid2">
+        <div class="metric"><p>Gastos</p><div class="val" id="m-total">$0</div></div>
+        <div class="metric"><p>Disponible</p><div class="val ok" id="m-rem">$0</div></div>
+        <div class="metric"><p>Ya pagué</p><div class="val ok" id="m-paid">$0</div></div>
+        <div class="metric"><p>Falta pagar</p><div class="val" id="m-pend">$0</div></div>
+    </div>
+
+    <div class="card">
+        <div id="exp-list"></div>
+        <div class="add-form">
+            <input type="text" id="new-name" placeholder="Nombre">
+            <input type="number" id="new-amt" placeholder="$">
+            <button class="btn-confirm" onclick="addExp()">+</button>
+        </div>
+        <button class="btn-action" onclick="copyPrev()">Copiar mes anterior</button>
+    </div>
+</div>
+
+<script>
+    const MONTHS=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+    let currentMonth = new Date().getMonth();
+    let db = JSON.parse(localStorage.getItem('budget_db_v4')) || {};
+
+    function save() { 
+        localStorage.setItem('budget_db_v4', JSON.stringify(db)); 
+        render(); 
+    }
+
+    function getMonthData(m) {
+        if (!db[m]) db[m] = { salary: 0, expenses: [] };
+        return db[m];
+    }
+
+    // Corrección: Formato de miles para el sueldo
+    function formatSalary(input) {
+        let val = input.value.replace(/\D/g, "");
+        if (val === "") { getMonthData(currentMonth).salary = 0; }
+        else {
+            let num = parseInt(val);
+            getMonthData(currentMonth).salary = num;
+            input.value = num.toLocaleString('es-CL');
+        }
+        save();
+    }
+
+    function render() {
+        const row = document.getElementById('months-row');
+        row.innerHTML = MONTHS.map((m, i) => `
+            <button class="month-pill ${i===currentMonth?'active':''}" onclick="currentMonth=${i}; render();">
+                ${m.substring(0,3)}
+            </button>
+        `).join('');
+
+        const d = getMonthData(currentMonth);
+        document.getElementById('month-name-lbl').innerText = MONTHS[currentMonth];
+        document.getElementById('salary-display').value = d.salary ? d.salary.toLocaleString('es-CL') : '';
+
+        const total = d.expenses.reduce((s, e) => s + e.amt, 0);
+        const paid = d.expenses.filter(e => e.paid).reduce((s, e) => s + e.amt, 0);
+        const pend = total - paid;
+        const rem = (d.salary || 0) - total;
+        
+        document.getElementById('m-total').innerText = '$' + total.toLocaleString('es-CL');
+        document.getElementById('m-rem').innerText = '$' + rem.toLocaleString('es-CL');
+        document.getElementById('m-rem').className = 'val ' + (rem < 0 ? 'bad' : 'ok');
+        document.getElementById('m-paid').innerText = '$' + paid.toLocaleString('es-CL');
+        document.getElementById('m-pend').innerText = '$' + pend.toLocaleString('es-CL');
+
+        const pct = d.salary > 0 ? Math.min((total/d.salary)*100, 100) : 0;
+        const fill = document.getElementById('prog-fill');
+        fill.style.width = pct + '%';
+        fill.style.background = pct > 90 ? 'var(--danger)' : 'var(--success)';
+
+        const list = document.getElementById('exp-list');
+        if(d.expenses.length === 0) {
+            list.innerHTML = '<p style="text-align:center; color:#ccc; font-size:13px; padding:10px;">Sin gastos.</p>';
+        } else {
+            list.innerHTML = d.expenses.map((e, i) => `
+                <div class="exp-item">
+                    <div class="check ${e.paid?'done':''}" onclick="togglePaid(${i})">${e.paid?'✓':''}</div>
+                    <div class="exp-info ${e.paid?'struck':''}">${e.name}</div>
+                    <div style="font-weight:bold">$${e.amt.toLocaleString('es-CL')}</div>
+                    <div onclick="delExp(${i})" style="color:#ccc; padding-left:10px; font-size:20px">×</div>
+                </div>
+            `).join('');
+        }
+    }
+
+    function addExp() {
+        const name = document.getElementById('new-name').value;
+        const amt = parseFloat(document.getElementById('new-amt').value);
+        if (name && amt) {
+            getMonthData(currentMonth).expenses.push({ name, amt, paid: false });
+            document.getElementById('new-name').value = '';
+            document.getElementById('new-amt').value = '';
+            save();
+        }
+    }
+
+    function togglePaid(i) {
+        getMonthData(currentMonth).expenses[i].paid = !getMonthData(currentMonth).expenses[i].paid;
+        save();
+    }
+
+    function delExp(i) {
+        getMonthData(currentMonth).expenses.splice(i, 1);
+        save();
+    }
+
+    function copyPrev() {
+        const prevIdx = (currentMonth === 0) ? 11 : currentMonth - 1;
+        const prevData = getMonthData(prevIdx);
+        if (prevData.expenses.length === 0) return alert("El mes anterior no tiene gastos.");
+        
+        if (confirm("¿Copiar gastos de " + MONTHS[prevIdx] + "?")) {
+            const current = getMonthData(currentMonth);
+            const copiedExps = prevData.expenses.map(e => ({ ...e, paid: false }));
+            current.expenses = [...current.expenses, ...copiedExps];
+            save();
+        }
+    }
+
+    render();
+</script>
+</body>
+</html>
