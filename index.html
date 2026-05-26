@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Presupuesto Zeta</title>
+    <title>Presupuesto Zeta - Quincenal</title>
     <style>
         :root {
             --bg: #f8f9fa;
@@ -38,13 +38,18 @@
         .val.ok { color: var(--success); }
         .val.bad { color: var(--danger); }
 
-        .exp-item { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid #eee; }
-        .check { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; background: none; flex-shrink: 0; }
+        /* Estilos de los gastos con abonos */
+        .exp-item { padding: 12px 0; border-bottom: 1px solid #eee; }
+        .exp-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+        .check { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; background: none; flex-shrink: 0; cursor: pointer; }
         .check.done { background: var(--success); border-color: var(--success); color: white; }
-        .exp-info { flex: 1; font-size: 15px; }
+        .exp-info { flex: 1; font-size: 15px; cursor: pointer; }
         .struck { text-decoration: line-through; color: var(--secondary); }
+        
+        .item-prog-bar { height: 4px; background: #e9ecef; border-radius: 2px; overflow: hidden; width: 100%; margin-top: 4px; }
+        .item-prog-fill { height: 100%; background: var(--primary); transition: width 0.3s; }
+        .item-status { font-size: 11px; color: var(--secondary); margin-top: 2px; display: flex; justify-content: space-between; }
 
-        /* Arreglo del formulario para que no se desborde */
         .add-form { display: flex; gap: 8px; margin-top: 15px; width: 100%; }
         .add-form input[type="text"] { flex: 2; min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
         .add-form input[type="number"] { flex: 1; min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
@@ -59,26 +64,26 @@
     <div class="months-row" id="months-row"></div>
 
     <div class="card">
-        <p style="font-size: 12px; color: var(--secondary)">Sueldo de <span id="month-name-lbl">...</span></p>
+        <p style="font-size: 12px; color: var(--secondary)">Presupuesto total (Quincenas) <span id="month-name-lbl">...</span></p>
         <div class="salary-row">
             <span style="font-size: 24px;">$</span>
-            <input type="text" id="salary-display" placeholder="0" oninput="formatSalary(this)">
+            <input type="text" id="salary-display" placeholder="Sueldo estimado mensual" oninput="formatSalary(this)">
         </div>
         <div class="prog-bar"><div id="prog-fill" class="prog-fill" style="width: 0%"></div></div>
     </div>
 
     <div class="grid2">
-        <div class="metric"><p>Gastos</p><div class="val" id="m-total">$0</div></div>
+        <div class="metric"><p>Gastos Totales</p><div class="val" id="m-total">$0</div></div>
         <div class="metric"><p>Disponible</p><div class="val ok" id="m-rem">$0</div></div>
-        <div class="metric"><p>Ya pagué</p><div class="val ok" id="m-paid">$0</div></div>
-        <div class="metric"><p>Falta pagar</p><div class="val" id="m-pend">$0</div></div>
+        <div class="metric"><p>Total Abonado</p><div class="val ok" id="m-paid">$0</div></div>
+        <div class="metric"><p>Falta por Abonar</p><div class="val" id="m-pend">$0</div></div>
     </div>
 
     <div class="card">
         <div id="exp-list"></div>
         <div class="add-form">
-            <input type="text" id="new-name" placeholder="Nombre">
-            <input type="number" id="new-amt" placeholder="$">
+            <input type="text" id="new-name" placeholder="Ej: Deuda BE">
+            <input type="number" id="new-amt" placeholder="Meta $">
             <button class="btn-confirm" onclick="addExp()">+</button>
         </div>
         <button class="btn-action" onclick="copyPrev()">Copiar mes anterior</button>
@@ -88,10 +93,10 @@
 <script>
     const MONTHS=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
     let currentMonth = new Date().getMonth();
-    let db = JSON.parse(localStorage.getItem('budget_db_v4')) || {};
+    let db = JSON.parse(localStorage.getItem('budget_db_v5')) || {};
 
     function save() { 
-        localStorage.setItem('budget_db_v4', JSON.stringify(db)); 
+        localStorage.setItem('budget_db_v5', JSON.stringify(db)); 
         render(); 
     }
 
@@ -100,7 +105,6 @@
         return db[m];
     }
 
-    // Corrección: Formato de miles para el sueldo
     function formatSalary(input) {
         let val = input.value.replace(/\D/g, "");
         if (val === "") { getMonthData(currentMonth).salary = 0; }
@@ -125,7 +129,8 @@
         document.getElementById('salary-display').value = d.salary ? d.salary.toLocaleString('es-CL') : '';
 
         const total = d.expenses.reduce((s, e) => s + e.amt, 0);
-        const paid = d.expenses.filter(e => e.paid).reduce((s, e) => s + e.amt, 0);
+        // Ahora sumamos los abonos reales acumulados
+        const paid = d.expenses.reduce((s, e) => s + (e.currentPaid || 0), 0);
         const pend = total - paid;
         const rem = (d.salary || 0) - total;
         
@@ -142,16 +147,36 @@
 
         const list = document.getElementById('exp-list');
         if(d.expenses.length === 0) {
-            list.innerHTML = '<p style="text-align:center; color:#ccc; font-size:13px; padding:10px;">Sin gastos.</p>';
+            list.innerHTML = '<p style="text-align:center; color:#ccc; font-size:13px; padding:10px;">Sin gastos asignados.</p>';
         } else {
-            list.innerHTML = d.expenses.map((e, i) => `
+            list.innerHTML = d.expenses.map((e, i) => {
+                const currentPaid = e.currentPaid || 0;
+                const itemPct = Math.min((currentPaid / e.amt) * 100, 100);
+                const isDone = currentPaid >= e.amt;
+
+                return `
                 <div class="exp-item">
-                    <div class="check ${e.paid?'done':''}" onclick="togglePaid(${i})">${e.paid?'✓':''}</div>
-                    <div class="exp-info ${e.paid?'struck':''}">${e.name}</div>
-                    <div style="font-weight:bold">$${e.amt.toLocaleString('es-CL')}</div>
-                    <div onclick="delExp(${i})" style="color:#ccc; padding-left:10px; font-size:20px">×</div>
-                </div>
-            `).join('');
+                    <div class="exp-row">
+                        <div class="check ${isDone?'done':''}" onclick="quickFullPay(${i})">${isDone?'✓':''}</div>
+                        <div class="exp-info ${isDone?'struck':''}" onclick="makeAbono(${i})">
+                            <strong>${e.name}</strong>
+                        </div>
+                        <div style="font-weight:bold; cursor:pointer;" onclick="makeAbono(${i})">
+                            $${currentPaid.toLocaleString('es-CL')} / $${e.amt.toLocaleString('es-CL')}
+                        </div>
+                        <div onclick="delExp(${i})" style="color:#ccc; padding-left:10px; font-size:20px; cursor:pointer;">×</div>
+                    </div>
+                    <div class="item-prog-bar">
+                        <div class="item-prog-fill" style="width: ${itemPct}%; background: ${isDone ? 'var(--success)' : 'var(--primary)'}"></div>
+                    </div>
+                    <div class="item-status">
+                        <span>${itemPct.toFixed(0)}% completado</span>
+                        <span style="color: ${isDone ? 'var(--success)' : 'var(--secondary)'}">
+                            ${isDone ? 'Pagado' : 'Toca para abonar'}
+                        </span>
+                    </div>
+                </div>`;
+            }).join('');
         }
     }
 
@@ -159,15 +184,42 @@
         const name = document.getElementById('new-name').value;
         const amt = parseFloat(document.getElementById('new-amt').value);
         if (name && amt) {
-            getMonthData(currentMonth).expenses.push({ name, amt, paid: false });
+            // Estructura nueva con campo 'currentPaid' para registrar abonos
+            getMonthData(currentMonth).expenses.push({ name, amt, currentPaid: 0 });
             document.getElementById('new-name').value = '';
             document.getElementById('new-amt').value = '';
             save();
         }
     }
 
-    function togglePaid(i) {
-        getMonthData(currentMonth).expenses[i].paid = !getMonthData(currentMonth).expenses[i].paid;
+    // Función interactiva para hacer abonos parciales
+    function makeAbono(i) {
+        const exp = getMonthData(currentMonth).expenses[i];
+        const currentPaid = exp.currentPaid || 0;
+        const faltante = exp.amt - currentPaid;
+        
+        if (faltante <= 0) {
+            alert("Esta deuda ya está completamente pagada.");
+            return;
+        }
+
+        const montoAbono = prompt(`¿Cuánto deseas abonar a "${exp.name}"?\nFaltan por pagar: $${faltante.toLocaleString('es-CL')}`);
+        const numAbono = parseFloat(montoAbono);
+
+        if (!isNaN(numAbono) && numAbono > 0) {
+            exp.currentPaid = Math.min(currentPaid + numAbono, exp.amt);
+            save();
+        }
+    }
+
+    // El check redondo ahora sirve para pagarlo completo de un viaje si quieres
+    function quickFullPay(i) {
+        const exp = getMonthData(currentMonth).expenses[i];
+        if ((exp.currentPaid || 0) >= exp.amt) {
+            exp.currentPaid = 0; // Reset si ya estaba pagado
+        } else {
+            exp.currentPaid = exp.amt; // Completar total
+        }
         save();
     }
 
@@ -181,9 +233,10 @@
         const prevData = getMonthData(prevIdx);
         if (prevData.expenses.length === 0) return alert("El mes anterior no tiene gastos.");
         
-        if (confirm("¿Copiar gastos de " + MONTHS[prevIdx] + "?")) {
+        if (confirm("¿Copiar deudas base de " + MONTHS[prevIdx] + "?")) {
             const current = getMonthData(currentMonth);
-            const copiedExps = prevData.expenses.map(e => ({ ...e, paid: false }));
+            // Copiamos las metas de gastos pero reiniciamos los abonos a 0 para el nuevo mes
+            const copiedExps = prevData.expenses.map(e => ({ name: e.name, amt: e.amt, currentPaid: 0 }));
             current.expenses = [...current.expenses, ...copiedExps];
             save();
         }
